@@ -1,0 +1,25 @@
+# Python Virtual Environment
+# This folder is built locally by each developer and should never be tracked.
+/.venv/
+/pyvenv.cfg
+
+# Local Python Installation
+# This is a system-specific installation and MUST NOT be tracked.
+/python-3.10/
+
+# Log files
+# These are generated at runtime and should be ignored.
+*.log
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS / IDE specific files
+.DS_Store
+.idea/
+.vscode/
+
+# NOTE: The .task files ARE being tracked intentionally for this project.
