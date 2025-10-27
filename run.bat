@@ -1,46 +1,36 @@
 @echo off
-title Backend Server
 
 REM --- 1. Setup Paths ---
 REM This gets the directory where the .bat file is located
 SET "SCRIPT_DIR=%~dp0"
 REM Set paths for venv and requirements
-SET "VENV_DIR=%SCRIPT_DIR%venv"
+SET "VENV_DIR=%SCRIPT_DIR%.venv"
 SET "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 SET "VENV_PIP=%VENV_DIR%\Scripts\pip.exe"
 SET "REQS_FILE=%SCRIPT_DIR%requirements.txt"
-SET "APP_FILE=%SCRIPT_DIR%app.py"
 
 
 REM --- 2. Check if requirements.txt exists ---
 if not exist "%REQS_FILE%" (
     echo "ERROR: requirements.txt not found!"
-    echo "Please create a 'requirements.txt' file in this folder with:"
-    echo "Flask"
-    echo "flask-cors"
-    pause
-    exit /b
-)
-
-REM --- 3. Check if app.py exists ---
-if not exist "%APP_FILE%" (
-    echo "ERROR: app.py not found!"
-    echo "Please make sure your server file is named 'app.py' and is in this folder."
+    echo "This file is necessary to install the libraries."
+    echo "Please create it first by running this in your terminal:"
+    echo "pip freeze > requirements.txt"
     pause
     exit /b
 )
 
 
-REM --- 4. Check for 'venv' and Install Dependencies ---
+REM --- 3. Check for .venv and Install Dependencies ---
 if not exist "%VENV_DIR%" (
     echo "Virtual environment not found. Creating one..."
     
     REM Use the system's python to create the venv
-    python -m venv "%VENV_DIR%"
+    python -m venv .venv
     
     if %ERRORLEVEL% NEQ 0 (
         echo "ERROR: Failed to create virtual environment."
-        echo "Please make sure Python 3 is installed and in your system PATH."
+        echo "Please make sure Python 3.10 is installed and in your system PATH."
         pause
         exit /b
     )
@@ -62,18 +52,20 @@ if not exist "%VENV_DIR%" (
 )
 
 
-REM --- 5. Run the Server ---
-echo.
-echo ===================================
-echo  Starting Flask server...
-echo  (Press CTRL+C in this window to stop)
-echo ===================================
-echo.
+REM --- 4. Run the Scripts ---
+echo "Starting scripts. Output will be saved to log files."
 
-REM Run the app using the venv's Python.
-REM This runs it in the *current* window so you can see output.
-"%VENV_PYTHON%" "%APP_FILE%"
+REM Overwrite log file (>) for the server
+START "Emotion Display Server" cmd /c ""%VENV_PYTHON%" "display_emotion.py" > "display_server.log" 2>&1"
 
-echo.
-echo Server has been stopped.
-pause
+echo "Waiting 3 seconds for the server to start..."
+timeout /t 3 /nobreak > nul
+
+REM Overwrite log file (>) for the tracker
+START "Emotion Tracker" cmd /c ""%VENV_PYTHON%" "tracker.py" > "tracker.log" 2>&1"
+
+echo "Both scripts are running in the background."
+echo "Your OpenCV windows (the camera and emotion) should appear."
+echo "Close the OpenCV windows (press 'q') to stop the scripts."
+
+REM This .bat window will close.
