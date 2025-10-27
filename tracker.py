@@ -2,7 +2,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import time
-import socket # Added for communication
+import socket
+from path_helper import resource_path # <-- IMPORT THE HELPER
 
 # --- Model & Global Setup ---
 BaseOptions = mp.tasks.BaseOptions
@@ -17,12 +18,17 @@ mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 from mediapipe.framework.formats import landmark_pb2 
 
-# --- Emotion Interpretation Function (Facial) ---
+#
+# --- *** THIS FUNCTION IS FIXED *** ---
+#
 def interpret_emotion(blendshape_scores):
     """
     Interprets emotion based on MediaPipe blendshape scores using
     a simplified logic (Happy, Smile, Surprise, Neutral).
     """    
+    # The 'blendshape_scores' variable is ALREADY the dictionary we need.
+    # The redundant line that caused the error has been removed.
+    
     smile_val = (blendshape_scores.get('mouthSmileLeft', 0) + blendshape_scores.get('mouthSmileRight', 0)) / 2
     jaw_open_val = blendshape_scores.get('jawOpen', 0)
     teeth_show_val = (blendshape_scores.get('mouthUpperUpLeft', 0) + blendshape_scores.get('mouthUpperUpRight', 0)) / 2
@@ -44,167 +50,98 @@ def interpret_emotion(blendshape_scores):
     return "Neutral"
 
 # --- Gesture Detection Helper Functions ---
-# MediaPipe Hand Landmark indices
-# Tip indices: 4 (Thumb), 8 (Index), 12 (Middle), 16 (Ring), 20 (Pinky)
-# PIP (knuckle) indices: 3 (Thumb), 6 (Index), 10 (Middle), 14 (Ring), 18 (Pinky)
-#
-# MediaPipe Face Landmark indices
-# Mouth: 13 (Upper Lip), 14 (Lower Lip), 61 (Left Corner), 291 (Right Corner)
-# Nose/Eyes: 6 (Top of nose bridge, between eyes)
-
 def is_finger_open(landmarks, tip_idx, pip_idx):
-    """Checks if a finger is open by comparing Y-coordinates."""
-    # Screen coordinates: smaller Y is higher
     return landmarks[tip_idx].y < landmarks[pip_idx].y
-
 def is_thumb_open(landmarks):
-    """Checks if the thumb is open."""
     return landmarks[4].y < landmarks[3].y
-
 def calc_distance(lm1, lm2):
-    """Calculates the 2D normalized distance between two landmarks."""
     return ((lm1.x - lm2.x)**2 + (lm1.y - lm2.y)**2)**0.5
-
 def check_middle_finger(hand_landmarks):
-    """Checks for the middle finger gesture. (Relaxed)"""
     middle_open = is_finger_open(hand_landmarks, 12, 10)
     index_closed = not is_finger_open(hand_landmarks, 8, 6)
     ring_closed = not is_finger_open(hand_landmarks, 16, 14)
-    
     return middle_open and index_closed and ring_closed
-
 def check_hand_uwu(hand_landmarks):
-    """Checks for the 'L' shape (thumb + index) for UwU. (Relaxed)"""
     index_open = is_finger_open(hand_landmarks, 8, 6)
     thumb_open = is_thumb_open(hand_landmarks)
     middle_closed = not is_finger_open(hand_landmarks, 12, 10)
-    
     return index_open and thumb_open and middle_closed
-
 def check_v_shape(hand_landmarks):
-    """Checks for the 'V' (peace) sign."""
     index_open = is_finger_open(hand_landmarks, 8, 6)
     middle_open = is_finger_open(hand_landmarks, 12, 10)
     ring_closed = not is_finger_open(hand_landmarks, 16, 14)
     pinky_closed = not is_finger_open(hand_landmarks, 20, 18)
     thumb_closed = not is_thumb_open(hand_landmarks)
-    
     return index_open and middle_open and ring_closed and pinky_closed and thumb_closed
-
 def check_like_shape(hand_landmarks):
-    """Checks for the 'Like' (thumbs up) sign."""
     thumb_open = is_thumb_open(hand_landmarks)
     index_closed = not is_finger_open(hand_landmarks, 8, 6)
     middle_closed = not is_finger_open(hand_landmarks, 12, 10)
     ring_closed = not is_finger_open(hand_landmarks, 16, 14)
     pinky_closed = not is_finger_open(hand_landmarks, 20, 18)
-    
     return thumb_open and index_closed and middle_closed and ring_closed and pinky_closed
-
 def check_pointing_finger(hand_landmarks):
-    """Checks if only the index finger is pointing up."""
     index_open = is_finger_open(hand_landmarks, 8, 6)
     middle_closed = not is_finger_open(hand_landmarks, 12, 10)
     ring_closed = not is_finger_open(hand_landmarks, 16, 14)
     pinky_closed = not is_finger_open(hand_landmarks, 20, 18)
-    
     return index_open and middle_closed and ring_closed and pinky_closed
-
 def check_hand_open(hand_landmarks):
-    """Checks if all fingers on a hand are open."""
     return (is_finger_open(hand_landmarks, 8, 6) and
             is_finger_open(hand_landmarks, 12, 10) and
             is_finger_open(hand_landmarks, 16, 14) and
             is_finger_open(hand_landmarks, 20, 18) and
             is_thumb_open(hand_landmarks))
-
 def check_hand_at_face(hand_landmarks, face_box_norm):
-    """Checks if the hand (wrist) is within the Y-bounds of the face."""
-    wrist_y = hand_landmarks[0].y # Normalized Y of the wrist
+    wrist_y = hand_landmarks[0].y
     face_min_y = face_box_norm[1]
     face_max_y = face_box_norm[3]
-    
     return face_min_y < wrist_y < face_max_y
-
-#
-# --- *** UPDATED GESTURE DETECTION LOGIC *** ---
-#
 def detect_priority_gestures(hand_result, face_emotion, face_landmarks, face_box_norm):
-    """
-    Checks for priority gestures. Returns the gesture name or None.
-    'face_landmarks' is the full list of 478 points.
-    'face_box_norm' is the (min_x, min_y, max_x, max_y) tuple.
-    """
     if not hand_result.hand_landmarks:
-        return None # No hands detected
-
+        return None
     hands = hand_result.hand_landmarks
     num_hands = len(hands)
-
-    # --- 1. Check for 1-Hand Gestures ---
     if num_hands == 1:
         hand = hands[0]
-        
-        # --- "Silent" gesture ---
         if check_pointing_finger(hand) and face_landmarks:
-            tip = hand[8] # Index finger tip
-            
-            # Create a box from between the eyes down to the mouth
-            y_min = face_landmarks[6].y  # Point between eyes
-            y_max = face_landmarks[14].y # Point on lower lip
-            x_min = face_landmarks[61].x # Left mouth corner
-            x_max = face_landmarks[291].x # Right mouth corner
-            
+            tip = hand[8]
+            y_min = face_landmarks[6].y
+            y_max = face_landmarks[14].y
+            x_min = face_landmarks[61].x
+            x_max = face_landmarks[291].x
             if (x_min < tip.x < x_max) and (y_min < tip.y < y_max):
                 return "Silent"
-        # --- End of Silent check ---
-
-        # Check other 1-hand gestures
         if check_v_shape(hand):
             return "V"
         if check_like_shape(hand):
             return "Like"
         if check_middle_finger(hand):
             return "Middle Finger"
-
-    # --- 2. Check for 2-Hand Gestures ---
     if num_hands == 2:
-        
-        # --- CHANGED: Removed "Pray" check ---
-
-        # Check for UwU
         hand1_uwu = check_hand_uwu(hands[0])
         hand2_uwu = check_hand_uwu(hands[1])
         if hand1_uwu and hand2_uwu:
-            tip1 = hands[0][8] # Index finger tip
-            tip2 = hands[1][8] # Index finger tip
-            
+            tip1 = hands[0][8]
+            tip2 = hands[1][8]
             distance = calc_distance(tip1, tip2)
             vertically_aligned = abs(tip1.y - tip2.y) < 0.07
-            
             if distance < 0.15 and vertically_aligned:
                 return "UwU"
-        
-        # Check for Absolute Cinema
         if face_emotion == "Neutral" and face_box_norm:
             hand1_open = check_hand_open(hands[0])
             hand2_open = check_hand_open(hands[1])
             hand1_at_face = check_hand_at_face(hands[0], face_box_norm)
             hand2_at_face = check_hand_at_face(hands[1], face_box_norm)
-            
             if hand1_open and hand2_open and hand1_at_face and hand2_at_face:
                 return "Absolute Cinema"
-
-        # Check for middle finger on EITHER hand (even in a 2-hand pose)
         for hand in hands:
             if check_middle_finger(hand):
                 return "Middle Finger"
-
-    # --- 3. No priority gesture found ---
     return None
 
-# --- Main Program ---
-def run_tracker():
+# --- RENAMED TO main() ---
+def main():
     
     # --- 0. Connect to Display Server ---
     HOST = '127.0.0.1'
@@ -217,12 +154,13 @@ def run_tracker():
         print("Connected!")
     except Exception as e:
         print(f"Failed to connect to display server: {e}")
-        print("Please run 'python display_emotion.py' in another terminal first.")
+        print("Display server may not be running yet.")
         return
 
     # --- 1. Initialize Landmarkers ---
-    face_model_path = 'face_landmarker.task'
-    hand_model_path = 'hand_landmarker.task'
+    # --- USE resource_path() HERE ---
+    face_model_path = resource_path('face_landmarker.task')
+    hand_model_path = resource_path('hand_landmarker.task')
 
     face_options = FaceLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=face_model_path),
@@ -257,27 +195,24 @@ def run_tracker():
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
-            # --- 4. Detect Face (for fallback emotion and face box) ---
+            # --- 4. Detect Face ---
             face_result = face_detector.detect(mp_image)
-            face_emotion = "Neutral" # Default
-            face_landmarks = None # Full list of face landmarks
-            face_box_norm = None # Normalized face box for gesture logic
-            blendshape_scores = {} # Dictionary of blendshape scores
+            face_emotion = "Neutral"
+            face_landmarks = None
+            face_box_norm = None
+            blendshape_scores = {}
 
             if face_result.face_blendshapes:
                 blendshapes_list = face_result.face_blendshapes[0]
-                # Create dictionary for easy access
                 blendshape_scores = {c.category_name: c.score for c in blendshapes_list}
                 face_emotion = interpret_emotion(blendshape_scores)
             
             if face_result.face_landmarks:
                 face_landmarks = face_result.face_landmarks[0]
-                # Get normalized coords for gesture logic
                 x_coords = [lm.x for lm in face_landmarks]
                 y_coords = [lm.y for lm in face_landmarks]
                 face_box_norm = (min(x_coords), min(y_coords), max(x_coords), max(y_coords))
                 
-                # Get pixel coords for drawing
                 min_x = int(face_box_norm[0] * frame_width) - 10
                 max_x = int(face_box_norm[2] * frame_width) + 10
                 min_y = int(face_box_norm[1] * frame_height) - 10
@@ -286,14 +221,11 @@ def run_tracker():
             
             # --- 5. Detect Hands and Final Emotion ---
             hand_result = hand_detector.detect(mp_image)
-            
-            # Check for priority hand gestures
             priority_emotion = detect_priority_gestures(hand_result, face_emotion, face_landmarks, face_box_norm)
             
             if priority_emotion:
                 final_emotion = priority_emotion
             else:
-                # No hand gestures, fallback to face emotion
                 final_emotion = face_emotion 
 
             # --- 5b. SEND EMOTION TO DISPLAY ---
@@ -318,7 +250,6 @@ def run_tracker():
                     hand_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
                     for landmark in hand_landmarks_list:
                         hand_landmarks_proto.landmark.add(x=landmark.x, y=landmark.y, z=landmark.z)
-
                     mp_drawing.draw_landmarks(
                         frame,
                         hand_landmarks_proto,
@@ -335,8 +266,9 @@ def run_tracker():
         # --- 8. Cleanup ---
         cap.release()
         cv2.destroyAllWindows()
-        s.close() # Close the connection
+        s.close()
         print("Tracker shut down.")
 
+# This block lets the script be runnable OR importable
 if __name__ == "__main__":
-    run_tracker()
+    main()

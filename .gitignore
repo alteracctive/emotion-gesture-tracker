@@ -22,4 +22,9 @@ __pycache__/
 .idea/
 .vscode/
 
-# NOTE: The .task files ARE being tracked intentionally for this project.
+# Build artifacts
+/dist/
+/build/
+*.exe
+*.pkg
+*.spec
